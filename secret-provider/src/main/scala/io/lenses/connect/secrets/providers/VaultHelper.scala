@@ -8,8 +8,11 @@ package io.lenses.connect.secrets.providers
 
 import io.github.jopenlibs.vault.SslConfig
 import io.github.jopenlibs.vault.Vault
+import io.github.jopenlibs.vault.VaultException
 import io.github.jopenlibs.vault.VaultConfig
 import io.github.jopenlibs.vault.response.LogicalResponse
+import io.github.jopenlibs.vault.response.DatabaseResponse
+
 import com.typesafe.scalalogging.LazyLogging
 import com.typesafe.scalalogging.StrictLogging
 import io.lenses.connect.secrets.cache.ValueWithTtl
@@ -39,24 +42,49 @@ class VaultHelper(
   clock: Clock,
 ) extends SecretHelper
     with LazyLogging {
-  override def lookup(path: String): Either[Throwable, ValueWithTtl[Map[String, String]]] = {
+ override def lookup(path: String): Either[Throwable, ValueWithTtl[Map[String, String]]] = {
     logger.debug(s"Looking up value from Vault at [$path]")
-    Try(vaultClient.logical().read(path)) match {
-      case Failure(ex) =>
-        failWithEx(s"Failed to fetch secrets from path [$path]", ex)
-      case Success(response) if response.getRestResponse.getStatus != 200 =>
-        failWithEx(
-          s"No secrets found at path [$path]. Vault response: ${new String(response.getRestResponse.getBody)}",
-        )
-      case Success(response) if response.getData.isEmpty =>
-        failWithEx(s"No secrets found at path [$path]")
-      case Success(response) =>
-        val ttl =
-          Option(response.getLeaseDuration).filterNot(_ == 0L).map(Duration.of(_, ChronoUnit.SECONDS))
-        Right(
-          ValueWithTtl(ttl, defaultTtl, parseSuccessfulResponse(response)),
-        )
+    if (path.contains("database")){
+      val secretPath=path.split("creds")
+      Try(vaultClient.database(secretPath(0).substring(0,secretPath(0).length-1)).
+        creds(secretPath(1).substring(1))) match {
+        case Failure(ex) =>
+          failWithEx(s" Database Secret engine : Failed to fetch secrets from path [$path]", ex)
+        case Success(response) if response.getRestResponse.getStatus != 200 =>
+          failWithEx(
+            s"Database Secret engine : No secrets found at path [$path]. Vault response: ${new String(response.getRestResponse.getBody)}",
+          )
+        case Success(response) if response.getData.isEmpty =>
+          failWithEx(s" Database Secret² engine : No secrets found at path [$path]")
+        case Success(response) =>
+          val ttl =
+            Option(response.getLeaseDuration).filterNot(_ == 0L).map(Duration.of(_, ChronoUnit.SECONDS))
+          Right(
+            ValueWithTtl(ttl, defaultTtl, parseSuccessfulResponse(response)),
+          )
+      }
+
     }
+    else{
+      Try(vaultClient.logical().read(path)) match {
+        case Failure(ex) =>
+          failWithEx(s"Failed to fetch secrets from path [$path]", ex)
+        case Success(response) if response.getRestResponse.getStatus != 200 =>
+          failWithEx(
+            s"No secrets found at path [$path]. Vault response: ${new String(response.getRestResponse.getBody)}",
+          )
+        case Success(response) if response.getData.isEmpty =>
+          failWithEx(s"No secrets found at path [$path]")
+        case Success(response) =>
+          val ttl =
+            Option(response.getLeaseDuration).filterNot(_ == 0L).map(Duration.of(_, ChronoUnit.SECONDS))
+          Right(
+            ValueWithTtl(ttl, defaultTtl, parseSuccessfulResponse(response)),
+          )
+      }
+
+    }
+
   }
 
   private def parseSuccessfulResponse(
