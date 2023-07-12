@@ -60,7 +60,7 @@ class VaultHelper(
           val ttl =
             Option(response.getLeaseDuration).filterNot(_ == 0L).map(Duration.of(_, ChronoUnit.SECONDS))
           Right(
-            ValueWithTtl(ttl, defaultTtl, parseSuccessfulResponse(response)),
+            ValueWithTtl(ttl, defaultTtl, parseSuccessfulDatabaseResponse(response)),
           )
       }
 
@@ -87,6 +87,26 @@ class VaultHelper(
 
   }
 
+  private def parseSuccessfulDatabaseResponse(
+    response: DatabaseResponse,
+  ) = {
+    val secretValues    = response.getData.asScala
+    val fileWriterMaybe = fileWriterCreateFn()
+    secretValues.map {
+      case (k, v) =>
+        (k,
+         decodeKey(
+           encoding = EncodingAndId.from(k).encoding,
+           key      = k,
+           value    = v,
+           writeFileFn = { content =>
+             fileWriterMaybe.fold("nofile")(_.write(k.toLowerCase, content, k).toString)
+           },
+         ),
+        )
+    }.toMap
+  }
+      
   private def parseSuccessfulResponse(
     response: LogicalResponse,
   ) = {
